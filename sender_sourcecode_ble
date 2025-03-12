@@ -1,0 +1,98 @@
+#include <ArduinoBLE.h>
+
+// Pin Definitions
+#define JOY_BTN 0  // Joystick button
+#define OUTPUT_A 6  // Encoder Clock (A)
+#define OUTPUT_B 7  // Encoder Data (B)
+#define SWITCH 8  // Toggle switch
+
+int counter = 0;
+int aState;
+int aLastState;
+
+// BLE Service & Characteristic
+BLEService sensorService("19b10000-e8f2-537e-4f6c-d104768a1214"); // Custom service
+BLEStringCharacteristic sensorDataCharacteristic("19b10000-e8f2-537e-4f6c-d104768a1214", BLERead | BLENotify, 50); // Max 50 bytes
+
+void setup() {
+  Serial.begin(115200);
+  while(!Serial);
+  Serial.println("BLE Starting...");
+  
+  pinMode(JOY_BTN, INPUT_PULLUP);
+  pinMode(OUTPUT_A, INPUT);
+  pinMode(OUTPUT_B, INPUT);
+  pinMode(SWITCH, INPUT);
+  
+  aLastState = digitalRead(OUTPUT_A);
+
+  // Initialize BLE
+  if (!BLE.begin()) {
+    Serial.println("Failed to start BLE!");
+    while (1);
+  }
+  
+  // Set BLE device name
+  BLE.setLocalName("Nano 33 IoT");
+  BLE.setAdvertisedService(sensorService);
+  
+  // Add characteristic to service
+  sensorService.addCharacteristic(sensorDataCharacteristic);
+  BLE.addService(sensorService);
+
+  // Start advertising
+  BLE.advertise();
+  Serial.println("BLE Started. Waiting for connection...");
+
+  if (BLE.advertise()) {
+  Serial.println("Advertising started...");
+  } else {
+  Serial.println("Advertising failed!");
+  }
+}
+
+void loop() {
+  // Wait for BLE central
+  BLEDevice central = BLE.central();
+
+  if (central) {
+    Serial.print("Connected to: ");
+    Serial.println(central.address());
+
+    while (central.connected()) {
+      // Read joystick values (map 0-1023 to 0-255)
+      int joyX = map(analogRead(A1), 0, 1023, 0, 255);
+      int joyY = map(analogRead(A2), 0, 1023, 0, 255);
+      int switchState = digitalRead(SWITCH);
+
+      // Read rotary encoder
+      aState = digitalRead(OUTPUT_A);
+      if (aState != aLastState) {  
+        if (digitalRead(OUTPUT_B) != aState) {
+          counter++;
+        } else {
+          counter--;
+        }
+      }
+      aLastState = aState;
+
+      // Create JSON data string
+      String payload = "{";
+      payload += "\"joyX\":" + String(joyX) + ",";
+      payload += "\"joyY\":" + String(joyY) + ",";
+      payload += "\"switch\":" + String(switchState) + ",";
+      payload += "\"encoder\":" + String(counter);
+      payload += "}";
+
+      // Send data via BLE
+      sensorDataCharacteristic.writeValue(payload);
+      Serial.println("Sent: " + payload);
+
+      delay(100);
+    }
+
+    Serial.println("Disconnected.");
+  }
+}
+
+
